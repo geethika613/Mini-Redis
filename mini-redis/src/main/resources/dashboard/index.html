@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini-Redis Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel2: #1e2230; --border: #2a2f3e;
+    --text: #e6e8ef; --muted: #8b91a5; --accent: #e5484d; --green: #3fb950;
+    --yellow: #d29922; --blue: #58a6ff; --purple: #a371f7;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  .logo { width: 38px; height: 38px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 18px; }
+  h1 { font-size: 18px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); }
+  .pill.ok { color: var(--green); border-color: #23863666; background: #23863622; }
+  .pill.bad { color: #ff8589; border-color: #e5484d66; background: #e5484d22; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .chip { font: 12px var(--mono); padding: 3px 8px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.warn b { color: #ff8589; }
+  main { padding: 20px 24px; display: grid; gap: 16px; max-width: 1500px; margin: 0 auto; }
+  .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .stat .value { font-size: 26px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .stat .hint { color: var(--muted); font-size: 12px; }
+  .bar { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .row { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr; }
+  h2 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  h2 .tag { margin-left: auto; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .console { background: #0b0d12; border: 1px solid var(--border); border-radius: 8px; height: 290px; overflow: auto; padding: 10px 12px; font: 13px/1.55 var(--mono); }
+  .console .in { color: var(--blue); }
+  .console .out { white-space: pre-wrap; margin-bottom: 4px; }
+  .console .err { color: #ff8589; } .console .nil { color: var(--muted); } .console .int { color: var(--purple); }
+  .console .str { color: var(--green); } .console .status { color: var(--text); } .console .arr { color: var(--text); }
+  .prompt { display: flex; margin-top: 8px; gap: 8px; }
+  input { background: #0b0d12; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font: 13px var(--mono); }
+  input:focus { outline: none; border-color: var(--blue); }
+  .prompt input { flex: 1; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button:disabled { opacity: .55; cursor: wait; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); padding: 4px 8px; font: 12px var(--mono); }
+  button.ghost:hover { border-color: var(--blue); }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .feed { height: 360px; overflow: auto; font-size: 13px; }
+  .feed > div { padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: baseline; }
+  .feed time { color: var(--muted); font: 12px var(--mono); min-width: 70px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: .03em; white-space: nowrap; }
+  .b-evict { background: #e5484d33; color: #ff8589; } .b-expire { background: #d2992233; color: #e3b341; }
+  .b-conn { background: #58a6ff22; color: var(--blue); } .b-mru { background: #3fb95022; color: var(--green); }
+  .b-ok { background: #3fb95033; color: var(--green); } .b-fail { background: #e5484d33; color: #ff8589; }
+  .b-write { background: #a371f722; color: var(--purple); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--border); font-family: var(--mono); }
+  tr.victim td { background: #e5484d14; }
+  .ttl { display: flex; align-items: center; gap: 8px; }
+  .ttl .bar { width: 140px; margin: 0; } .ttl .bar > i { background: var(--yellow); }
+  .muted { color: var(--muted); }
+  code { font: 12px var(--mono); background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  .form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+  .form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 4px; }
+  .form input { width: 92px; }
+  .big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .big div { background: var(--panel2); border-radius: 8px; padding: 10px 12px; font-size: 12px; }
+  .big b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .empty { color: var(--muted); text-align: center; padding: 22px; font-family: inherit; }
+  .scroll { max-height: 380px; overflow: auto; }
+  .hbar { display: grid; grid-template-columns: 130px 1fr 100px; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .hbar-label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hbar-track { height: 20px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+  .hbar-track > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .4s; }
+  .hbar b { font-variant-numeric: tabular-nums; }
+  @media (max-width: 1100px) {
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .row { grid-template-columns: 1fr; }
+    .feed { height: auto; min-height: 60px; max-height: 360px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">R</div>
+  <div>
+    <h1>Mini-Redis Dashboard</h1>
+    <div class="sub">Redis-compatible key-value server built from scratch in Java 21 · TCP · RESP · TTL · LRU · AOF</div>
+  </div>
+  <span id="status" class="pill bad">Connecting…</span>
+  <div class="chips" id="config"></div>
+</header>
+
+<main>
+  <section class="stats">
+    <div class="card stat"><div class="label">Keys</div><div class="value" id="s-keys">–</div>
+      <div class="bar"><i id="s-keys-bar" style="width:0"></i></div><div class="hint" id="s-keys-hint">&nbsp;</div></div>
+    <div class="card stat"><div class="label">Connected clients</div><div class="value" id="s-clients">–</div>
+      <div class="hint" id="s-clients-hint">&nbsp;</div></div>
+    <div class="card stat"><div class="label">Ops / sec</div><div class="value" id="s-ops">0</div>
+      <div class="hint">live, excluding dashboard polling</div></div>
+    <div class="card stat"><div class="label">Commands processed</div><div class="value" id="s-cmds">–</div>
+      <div class="hint">since server start</div></div>
+    <div class="card stat"><div class="label">Evicted (LRU)</div><div class="value" id="s-evicted">–</div>
+      <div class="hint">store was full</div></div>
+    <div class="card stat"><div class="label">Expired (TTL)</div><div class="value" id="s-expired">–</div>
+      <div class="hint">lazy + background sweeper</div></div>
+  </section>
+
+  <section class="row">
+    <div class="card">
+      <h2>Console <span class="tag">RESP over TCP · port <span id="port">–</span></span></h2>
+      <div class="console" id="console"><div class="muted">Connected to Mini-Redis. Type a command or click one below.</div></div>
+      <form class="prompt" id="prompt">
+        <input id="cmd" autocomplete="off" spellcheck="false" placeholder="e.g. SET name alice">
+        <button>Send</button>
+      </form>
+      <div class="quick" id="quick"></div>
+    </div>
+    <div class="card">
+      <h2>Activity <span class="tag">evictions · expirations · connections</span>
+        <button class="ghost" type="button" id="feed-clear">clear</button></h2>
+      <div class="feed" id="feed"><div class="muted">Waiting for events…</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Keyspace <span class="tag">LRU order: most recently used at the top, next eviction at the bottom</span></h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="width:48px">#</th><th>Key</th><th>Value</th><th style="width:240px">TTL</th></tr></thead>
+        <tbody id="keys"></tbody>
+      </table>
+    </div>
+    <div class="muted" id="keys-more" style="margin-top:6px"></div>
+  </section>
+
+  <section class="row">
+    <div class="card">
+      <h2>Concurrency test <span class="tag">N clients × M INCR on one key</span></h2>
+      <form class="form" id="race-form">
+        <label>Clients<input name="clients" value="50"></label>
+        <label>INCR per client<input name="ops" value="1000"></label>
+        <button id="race-btn">Run race test</button>
+      </form>
+      <div class="muted" style="margin-top:10px">
+        Global lock is <b id="lock-state">–</b>. Start the server with <code>--unsafe-no-lock</code> to see lost updates.
+      </div>
+      <div id="race-result" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>Benchmark <span class="tag">SET throughput · run several configs to compare</span></h2>
+      <form class="form" id="bench-form">
+        <label>Label<input name="label" value="baseline" style="width:120px"></label>
+        <label>Clients<input name="clients" value="10"></label>
+        <label>Ops / client<input name="ops" value="5000"></label>
+        <label>Pipeline<input name="pipeline" value="1"></label>
+        <button id="bench-btn">Run benchmark</button>
+      </form>
+      <div id="chart" style="margin-top:14px"></div>
+      <table id="bench-table" style="margin-top:6px">
+        <thead><tr><th>Run</th><th>Ops/sec</th><th>p50</th><th>p99</th></tr></thead>
+        <tbody><tr><td colspan="4" class="empty">No runs yet</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = n => Number(n).toLocaleString();
+const trunc = v => v.length > 48 ? v.slice(0, 48) + '…' : v;
+const POLL_MS = 500, POLL_COMMANDS = 2;   // each poll sends INFO + INSPECT
+
+let prev = null, prevTime = 0, ttlMax = {};
+const cmdHistory = []; let histPos = 0;
+const runs = [];
+
+// ---------- polling ----------
+async function poll() {
+  try {
+    const res = await fetch('/api/state');
+    const s = await res.json();
+    if (!s.connected) throw new Error(s.error || 'server down');
+    render(s);
+  } catch (e) {
+    $('status').className = 'pill bad';
+    $('status').textContent = 'Disconnected · start Mini-Redis';
+    prev = null;
+  }
+  setTimeout(poll, POLL_MS);
+}
+
+function render(s) {
+  const i = s.info, now = performance.now();
+  $('status').className = 'pill ok';
+  $('status').textContent = '● Connected';
+  const lockOff = i.global_lock === 'off';
+  $('config').innerHTML = [
+    ['port', i.port], ['threads', i.threads], ['fsync', i.fsync], ['aof', i.aof],
+    ['global lock', i.global_lock], ['idle timeout', i.idle_timeout_ms + 'ms']
+  ].map(([k, v]) => `<span class="chip ${k === 'global lock' && lockOff ? 'warn' : ''}">${k} <b>${esc(v)}</b></span>`).join('');
+  $('port').textContent = i.port;
+  $('lock-state').textContent = (i.global_lock || '').toUpperCase();
+
+  const keys = +i.keys, max = +i.max_keys;
+  $('s-keys').textContent = fmt(keys);
+  $('s-keys-bar').style.width = Math.min(100, keys / max * 100) + '%';
+  $('s-keys-hint').textContent = `max ${fmt(max)} · LRU evicts above this`;
+  $('s-clients').textContent = fmt(i.connected_clients);
+  $('s-clients-hint').textContent = `max ${fmt(i.max_clients)} · ${fmt(i.rejected_connections)} rejected`;
+  $('s-cmds').textContent = fmt(i.total_commands);
+  $('s-evicted').textContent = fmt(i.evicted_keys);
+  $('s-expired').textContent = fmt(i.expired_keys);
+  if (prev) {
+    const seconds = (now - prevTime) / 1000;
+    const delta = Math.max(0, (+i.total_commands - +prev.info.total_commands) - POLL_COMMANDS);
+    $('s-ops').textContent = fmt(Math.round(delta / seconds));
+    diff(prev, s);
+  }
+  renderKeys(s);
+  prev = s; prevTime = now;
+}
+
+function diff(p, s) {
+  const pi = p.info, i = s.info;
+  const evicted = +i.evicted_keys - +pi.evicted_keys;
+  const expired = +i.expired_keys - +pi.expired_keys;
+  const current = new Set(s.keys.map(k => k.key));
+  const gone = p.keys.filter(k => !current.has(k.key));
+  if (evicted > 0) {
+    addFeed('evict', evicted === 1 && pi.lru_victim
+      ? `Key <b>${esc(pi.lru_victim)}</b> evicted: least recently used, store was full`
+      : `${fmt(evicted)} keys evicted by LRU`);
+  }
+  if (expired > 0) {
+    const names = gone.filter(k => k.ttl >= 0).map(k => k.key);
+    addFeed('expire', names.length && names.length <= 5
+      ? `Key${names.length > 1 ? 's' : ''} <b>${names.map(esc).join(', ')}</b> expired (TTL reached)`
+      : `${fmt(expired)} key(s) expired`);
+  }
+  const dc = +i.connected_clients - +pi.connected_clients;
+  if (dc !== 0) addFeed('conn', `Connected clients ${pi.connected_clients} → ${i.connected_clients}`);
+}
+
+function addFeed(kind, html) {
+  const feed = $('feed');
+  if (feed.firstElementChild && feed.firstElementChild.classList.contains('muted')) feed.innerHTML = '';
+  const row = document.createElement('div');
+  row.innerHTML = `<time>${new Date().toLocaleTimeString()}</time><span class="badge b-${kind}">${kind.toUpperCase()}</span><span>${html}</span>`;
+  feed.prepend(row);
+  while (feed.children.length > 150) feed.lastElementChild.remove();
+}
+
+$('feed-clear').onclick = () => { $('feed').innerHTML = '<div class="muted">Waiting for events…</div>'; };
+
+function renderKeys(s) {
+  const i = s.info, tb = $('keys');
+  if (!s.keys.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="empty">No keys yet. Try <code>SET name alice</code></td></tr>';
+    $('keys-more').textContent = '';
+    return;
+  }
+  const full = +i.keys >= +i.max_keys;
+  tb.innerHTML = s.keys.map((k, idx) => {
+    let ttl = '<span class="muted">no expiry</span>';
+    if (k.ttl >= 0) {
+      ttlMax[k.key] = Math.max(ttlMax[k.key] || 0, k.ttl);
+      const pct = ttlMax[k.key] ? k.ttl / ttlMax[k.key] * 100 : 0;
+      ttl = `<div class="ttl"><div class="bar"><i style="width:${pct}%"></i></div>${(k.ttl / 1000).toFixed(1)}s</div>`;
+    } else {
+      delete ttlMax[k.key];
+    }
+    const isVictim = k.key === i.lru_victim && s.keys.length > 1;
+    let tag = '';
+    if (idx === 0 && s.keys.length > 1) tag = '<span class="badge b-mru">MOST RECENT</span>';
+    if (isVictim) tag = `<span class="badge b-evict">${full ? 'NEXT EVICTION' : 'LEAST RECENT'}</span>`;
+    return `<tr class="${isVictim && full ? 'victim' : ''}"><td class="muted">${idx + 1}</td><td>${esc(k.key)} ${tag}</td><td>${esc(trunc(k.value))}</td><td>${ttl}</td></tr>`;
+  }).join('');
+  $('keys-more').textContent = +i.keys > s.keys.length ? `Showing ${s.keys.length} most recent of ${fmt(i.keys)} keys` : '';
+}
+
+// ---------- console ----------
+async function send(cmd) {
+  cmd = cmd.trim();
+  if (!cmd) return;
+  cmdHistory.push(cmd); histPos = cmdHistory.length;
+  let res;
+  try {
+    const r = await fetch('/api/command', { method: 'POST', body: cmd });
+    res = await r.json();
+    if (res.error) res = { type: 'err', output: '(error) ' + res.error };
+  } catch (e) {
+    res = { type: 'err', output: '(error) dashboard request failed' };
+  }
+  const c = $('console');
+  c.insertAdjacentHTML('beforeend',
+    `<div class="in">mini-redis:${esc(prev ? prev.info.port : '')}&gt; ${esc(cmd)}</div><div class="out ${esc(res.type)}">${esc(res.output)}</div>`);
+  c.scrollTop = c.scrollHeight;
+}
+$('prompt').onsubmit = e => { e.preventDefault(); send($('cmd').value); $('cmd').value = ''; };
+$('cmd').onkeydown = e => {
+  if (e.key === 'ArrowUp' && histPos > 0) { $('cmd').value = cmdHistory[--histPos]; e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { histPos = Math.min(cmdHistory.length, histPos + 1); $('cmd').value = cmdHistory[histPos] || ''; e.preventDefault(); }
+};
+const QUICK = ['SET name alice', 'GET name', 'INCR visits', 'SET session abc123 EX 15', 'TTL session',
+               'EXPIRE name 30', 'EXISTS name session', 'DEL name', 'DBSIZE', 'PING'];
+$('quick').innerHTML = QUICK.map(q => `<button class="ghost" type="button">${esc(q)}</button>`).join('');
+$('quick').querySelectorAll('button').forEach(b => b.onclick = () => send(b.textContent));
+
+// ---------- race test ----------
+$('race-form').onsubmit = async e => {
+  e.preventDefault();
+  const f = new FormData(e.target), btn = $('race-btn');
+  btn.disabled = true; btn.textContent = 'Running…';
+  try {
+    const r = await fetch(`/api/race?clients=${encodeURIComponent(f.get('clients'))}&ops=${encodeURIComponent(f.get('ops'))}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const pass = d.expected === d.actual, lock = prev ? prev.info.global_lock.toUpperCase() : '?';
+    $('race-result').innerHTML =
+      `<span class="badge ${pass ? 'b-ok' : 'b-fail'}">${pass ? 'PASS · NO LOST UPDATES' : 'FAIL · RACE CONDITION'}</span>
+       <span class="muted">${d.clients} clients × ${fmt(d.ops)} INCR in ${fmt(d.millis)} ms · global lock ${esc(lock)}</span>
+       <div class="big">
+         <div><span class="muted">Expected</span><b>${fmt(d.expected)}</b></div>
+         <div><span class="muted">Actual</span><b>${fmt(d.actual)}</b></div>
+         <div><span class="muted">Lost updates</span><b style="color:${pass ? 'var(--green)' : '#ff8589'}">${fmt(d.expected - d.actual)}</b></div>
+       </div>`;
+  } catch (err) {
+    $('race-result').innerHTML = `<span class="badge b-fail">ERROR</span> ${esc(err.message)}`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Run race test';
+  }
+};
+
+// ---------- benchmark ----------
+$('bench-form').onsubmit = async e => {
+  e.preventDefault();
+  const f = new FormData(e.target), btn = $('bench-btn');
+  btn.disabled = true; btn.textContent = 'Running…';
+  try {
+    const qs = ['clients', 'ops', 'pipeline'].map(k => `${k}=${encodeURIComponent(f.get(k))}`).join('&');
+    const r = await fetch(`/api/bench?${qs}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const label = (f.get('label') || '').trim() || `run ${runs.length + 1}`;
+    runs.push({ label, fsync: prev ? prev.info.fsync : '', ...d });
+    renderBench();
+  } catch (err) {
+    alert('Benchmark failed: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Run benchmark';
+  }
+};
+
+function renderBench() {
+  const max = Math.max(...runs.map(r => r.opsPerSec));
+  $('chart').innerHTML = runs.map(r =>
+    `<div class="hbar"><span class="hbar-label">${esc(r.label)}</span>
+       <span class="hbar-track"><i style="width:${Math.max(1, r.opsPerSec / max * 100)}%"></i></span>
+       <b>${fmt(Math.round(r.opsPerSec))}/s</b></div>`).join('');
+  document.querySelector('#bench-table tbody').innerHTML = runs.map(r =>
+    `<tr><td>${esc(r.label)} <span class="muted">(${r.clients}c × ${fmt(r.ops)}, P=${r.pipeline}, fsync=${esc(r.fsync)})</span></td>
+     <td>${fmt(Math.round(r.opsPerSec))}</td><td>${r.p50Ms.toFixed(2)} ms${r.pipeline > 1 ? '/batch' : ''}</td><td>${r.p99Ms.toFixed(2)} ms</td></tr>`).join('');
+}
+
+poll();
+</script>
+</body>
+</html>
